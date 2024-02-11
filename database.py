@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date
 from sqlalchemy import create_engine, Column, Integer, String, ForeignKey, DateTime, Boolean
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
@@ -35,37 +35,51 @@ def init_db():
 
 # Функция добавления урока в расписание.
 def add_schedule_entry(subject_name, teacher_names, classroom_number):
-     # Добавление урока с проверкой на существование всех связанных сущностей.
     session = Session()
+    lesson_date = date.today()
+
+    # Проверка и добавление предмета
     subject = session.query(Subject).filter_by(name=subject_name).first()
     if not subject:
         subject = Subject(name=subject_name)
         session.add(subject)
         session.commit()
 
+    # Проверка существования кабинета
     classroom = session.query(Classroom).filter_by(number=classroom_number).first()
     if not classroom:
-        print(f"Кабинет {classroom_number} не найден.")
-        return
+        session.close()
+        return False, f"Кабинет {classroom_number} не найден."
 
-    teachers = []
-    for name in teacher_names.split(', '):
+    message = ""
+
+    # Перебор и проверка преподавателей
+    teachers_names_list = teacher_names.split(', ')
+    for name in teachers_names_list:
         teacher = session.query(Teacher).filter_by(name=name).first()
         if not teacher:
             teacher = Teacher(name=name)
             session.add(teacher)
             session.commit()
-        teachers.append(teacher)
 
-    for teacher in teachers:
-        new_schedule = Schedule(subject_id=subject.id, teacher_id=teacher.id, classroom_id=classroom.id)
-        session.add(new_schedule)
-    
+        # Проверка количества уроков, которые преподаватель ведет в этот день
+        count_lessons_today = session.query(Schedule).filter(Schedule.teacher_id == teacher.id, Schedule.date == lesson_date).count()
+        if count_lessons_today >= 5:
+            session.close()
+            return False, f"Преподаватель {name} не может вести более 5 уроков за день."
+
+    # Создание и добавление нового урока
+    new_schedule = Schedule(subject_id=subject.id, teacher_id=teacher.id, classroom_id=classroom.id, date=lesson_date)
+    session.add(new_schedule)
+
     try:
         session.commit()
+        message = "Урок успешно добавлен в расписание."
+        return True, message
     except Exception as e:
         session.rollback()
-        print(f"Ошибка при добавлении урока: {e}")
+        message = f"Ошибка при добавлении урока: {e}"
+        return False, message
     finally:
         session.close()
 
